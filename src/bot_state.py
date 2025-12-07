@@ -14,10 +14,19 @@ from kalshi_api import KalshiAPI
 # Add settings manager import
 try:
     from settings_manager import SettingsManager
-    settings_manager = SettingsManager()
-except ImportError:
-    settings_manager = None
-    logging.warning("SettingsManager not available, settings commands will be limited")
+    settings_available = True
+except ImportError as e:
+    settings_available = False
+    logging.warning(f"SettingsManager not available: {e}")
+
+# Initialize settings manager if available
+settings_manager = None
+if settings_available:
+    try:
+        settings_manager = SettingsManager()
+    except Exception as e:
+        logging.error(f"Failed to initialize settings manager: {e}")
+        settings_available = False
 
 
 def _cents_to_dollars(value: Any) -> float | None:
@@ -125,32 +134,32 @@ def fetch_performance(api: KalshiAPI) -> Dict[str, Any]:
 
 def fetch_settings() -> Dict[str, Any]:
     """Fetch current bot settings."""
-    if settings_manager is None:
-        return {"error": "Settings manager not available"}
+    if not settings_available or settings_manager is None:
+        return {"error": "Settings manager not available", "available": settings_available}
 
     return settings_manager.get_settings()
 
 
 def update_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
     """Update bot settings."""
-    if settings_manager is None:
-        return {"success": False, "error": "Settings manager not available"}
+    if not settings_available or settings_manager is None:
+        return {"success": False, "error": "Settings manager not available", "available": settings_available}
 
     return settings_manager.update_settings(updates)
 
 
 def reset_settings() -> Dict[str, Any]:
     """Reset settings to defaults."""
-    if settings_manager is None:
-        return {"success": False, "error": "Settings manager not available"}
+    if not settings_available or settings_manager is None:
+        return {"success": False, "error": "Settings manager not available", "available": settings_available}
 
     return settings_manager.reset_to_defaults()
 
 
 def fetch_settings_info() -> Dict[str, Any]:
     """Get information about available settings."""
-    if settings_manager is None:
-        return {"error": "Settings manager not available"}
+    if not settings_available or settings_manager is None:
+        return {"error": "Settings manager not available", "available": settings_available}
 
     return settings_manager.get_setting_info()
 
