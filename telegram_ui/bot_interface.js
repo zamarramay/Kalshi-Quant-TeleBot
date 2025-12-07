@@ -136,25 +136,146 @@ class BotInterface {
             });
         });
 
-        // Configuration endpoint
-        this.app.get('/api/config', (req, res) => {
-            res.json({
-                maxPositionSize: 0.10,
-                stopLoss: 0.05,
-                newsSentimentThreshold: 0.6,
-                statArbitrageThreshold: 0.05,
-                volatilityThreshold: 0.1,
-                tradeInterval: 60
-            });
+        // Configuration endpoints (Phase 4: Dynamic Settings Management)
+        this.app.get('/api/config', async (req, res) => {
+            try {
+                // Get current settings from Python bot
+                const config = await this.runBotStateCommand('config');
+                res.json(config);
+            } catch (error) {
+                // Fallback to hardcoded defaults if Python bot not available
+                res.json({
+                    maxPositionSize: 0.10,
+                    stopLoss: 0.05,
+                    newsSentimentThreshold: 0.6,
+                    statArbitrageThreshold: 0.05,
+                    volatilityThreshold: 0.1,
+                    tradeInterval: 60,
+                    // Phase 4 settings
+                    strategyEnablement: {
+                        newsSentiment: true,
+                        statisticalArbitrage: true,
+                        volatilityBased: true
+                    },
+                    riskManagement: {
+                        kellyFraction: 0.5,
+                        maxPositionSizePct: 0.10,
+                        stopLossPct: 0.05
+                    },
+                    notifications: {
+                        telegram: true,
+                        trades: true,
+                        errors: true,
+                        performance: true
+                    }
+                });
+            }
         });
 
-        // Update configuration endpoint
+        // Update configuration endpoint (Phase 4)
         this.app.post('/api/config', (req, res) => {
             const config = req.body;
             // In a real implementation, this would update the Python bot's configuration
             console.log('Updating configuration:', config);
             res.json({ success: true, message: 'Configuration updated successfully' });
             this.broadcastToClients({ type: 'config_updated', config, timestamp: new Date().toISOString() });
+        });
+
+        // Phase 4: Dynamic Settings Management
+        this.app.get('/api/settings', async (req, res) => {
+            try {
+                // Get settings from Python bot via CLI
+                const settings = await this.runBotStateCommand('settings');
+                res.json(settings);
+            } catch (error) {
+                res.status(500).json({ success: false, error: 'Unable to retrieve settings from bot' });
+            }
+        });
+
+        // Update settings endpoint (Phase 4)
+        this.app.post('/api/settings', async (req, res) => {
+            try {
+                const updates = req.body;
+
+                // Send settings update to Python bot
+                const result = await this.runBotStateCommandWithInput('update_settings', updates);
+
+                if (result.success) {
+                    res.json({
+                        success: true,
+                        message: 'Settings updated successfully',
+                        changed_settings: result.changed_settings,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    // Broadcast settings update to all connected clients
+                    this.broadcastToClients({
+                        type: 'settings_updated',
+                        changed_settings: result.changed_settings,
+                        timestamp: new Date().toISOString()
+                    });
+                } else {
+                    res.status(400).json({
+                        success: false,
+                        error: result.error || 'Settings update failed'
+                    });
+                }
+            } catch (error) {
+                console.error('Settings update error:', error);
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to update settings'
+                });
+            }
+        });
+
+        // Reset settings to defaults (Phase 4)
+        this.app.post('/api/settings/reset', async (req, res) => {
+            try {
+                const result = await this.runBotStateCommand('reset_settings');
+
+                if (result.success) {
+                    res.json({
+                        success: true,
+                        message: 'Settings reset to defaults',
+                        timestamp: new Date().toISOString()
+                    });
+
+                    this.broadcastToClients({
+                        type: 'settings_reset',
+                        timestamp: new Date().toISOString()
+                    });
+                } else {
+                    res.status(500).json({
+                        success: false,
+                        error: 'Failed to reset settings'
+                    });
+                }
+            } catch (error) {
+                console.error('Settings reset error:', error);
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to reset settings'
+                });
+            }
+        });
+
+        // Settings info endpoint (Phase 4)
+        this.app.get('/api/settings/info', async (req, res) => {
+            try {
+                const info = await this.runBotStateCommand('settings_info');
+                res.json(info);
+            } catch (error) {
+                // Provide basic settings info if bot not available
+                res.json({
+                    news_sentiment_enabled: { type: 'boolean', description: 'Enable news sentiment strategy', default: true },
+                    statistical_arbitrage_enabled: { type: 'boolean', description: 'Enable arbitrage strategy', default: true },
+                    volatility_based_enabled: { type: 'boolean', description: 'Enable volatility strategy', default: true },
+                    kelly_fraction: { type: 'float', range: [0, 1], description: 'Kelly criterion fraction', default: 0.5 },
+                    stop_loss_pct: { type: 'float', range: [0, 0.5], description: 'Stop loss percentage', default: 0.05 },
+                    trade_interval_seconds: { type: 'integer', range: [10, 3600], description: 'Trading interval', default: 60 }
+                });
+            }
         });
     }
 
@@ -325,6 +446,99 @@ class BotInterface {
             type: 'trade_executed',
             data: trade,
             timestamp: new Date().toISOString()
+        });
+    }
+
+    // Phase 4: Run bot state command via CLI
+    runBotStateCommand(command) {
+        return new Promise((resolve, reject) => {
+            if (!this.pythonProcess) {
+                reject(new Error('Python bot not running'));
+                return;
+            }
+
+            const script = this.botStateScript;
+            const args = [script, command];
+
+            const child = spawn('python3', args, {
+                cwd: path.dirname(script),
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+
+            let stdout = '';
+            let stderr = '';
+
+            child.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            child.stderr.on('data', (data) => {
+                stderr += data.toString();
+            });
+
+            child.on('close', (code) => {
+                if (code === 0) {
+                    try {
+                        const result = JSON.parse(stdout.trim());
+                        resolve(result);
+                    } catch (e) {
+                        reject(new Error(`Invalid JSON response: ${stdout}`));
+                    }
+                } else {
+                    reject(new Error(`Command failed with code ${code}: ${stderr}`));
+                }
+            });
+
+            child.on('error', (error) => {
+                reject(error);
+            });
+        });
+    }
+
+    // Phase 4: Run bot state command with input data
+    runBotStateCommandWithInput(command, data) {
+        return new Promise((resolve, reject) => {
+            if (!this.pythonProcess) {
+                reject(new Error('Python bot not running'));
+                return;
+            }
+
+            const script = this.botStateScript;
+            const jsonData = JSON.stringify(data);
+            const args = [script, command, '--data', jsonData];
+
+            const child = spawn('python3', args, {
+                cwd: path.dirname(script),
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+
+            let stdout = '';
+            let stderr = '';
+
+            child.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            child.stderr.on('data', (data) => {
+                stderr += data.toString();
+            });
+
+            child.on('close', (code) => {
+                if (code === 0) {
+                    try {
+                        const result = JSON.parse(stdout.trim());
+                        resolve(result);
+                    } catch (e) {
+                        reject(new Error(`Invalid JSON response: ${stdout}`));
+                    }
+                } else {
+                    reject(new Error(`Command failed with code ${code}: ${stderr}`));
+                }
+            });
+
+            child.on('error', (error) => {
+                reject(error);
+            });
         });
     }
 

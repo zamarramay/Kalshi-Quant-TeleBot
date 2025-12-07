@@ -10,6 +10,7 @@ from volatility_analyzer import VolatilityAnalyzer
 from risk_manager import RiskManager
 from market_data_streamer import MarketDataStreamer
 from performance_analytics import PerformanceAnalytics, Trade
+from settings_manager import SettingsManager
 
 class Trader:
     def __init__(self, api, notifier, logger, bankroll):
@@ -27,8 +28,33 @@ class Trader:
         self.market_data_streamer = MarketDataStreamer(api, update_interval=60)  # Update every minute
         self.performance_analytics = PerformanceAnalytics()
 
+        # Phase 4: Dynamic settings management
+        self.settings_manager = SettingsManager()
+        self.settings_manager.add_change_listener(self._on_settings_changed)
+
         # Subscribe to market data updates for real-time monitoring
         self.market_data_streamer.add_subscriber(self._on_market_data_update)
+
+    def _on_settings_changed(self, changed_settings: Dict[str, Any]):
+        """Handle dynamic settings changes."""
+        self.logger.info(f"Settings updated: {list(changed_settings.keys())}")
+
+        # Update market data streamer interval if changed
+        if 'market_data_update_interval' in changed_settings:
+            new_interval = self.settings_manager.settings.market_data_update_interval
+            self.market_data_streamer.update_interval = new_interval
+            self.logger.info(f"Market data update interval changed to {new_interval}s")
+
+        # Update risk manager settings if changed
+        if any(key in changed_settings for key in ['kelly_fraction', 'max_position_size_pct', 'stop_loss_pct']):
+            # Risk manager will use updated settings automatically
+            self.logger.info("Risk management settings updated")
+
+        # Notify via telegram if enabled
+        if self.settings_manager.settings.telegram_notifications:
+            changes_summary = ", ".join([f"{k}: {v['old_value']} → {v['new_value']}"
+                                       for k, v in changed_settings.items()])
+            self.notifier.send_trade_notification(f"⚙️ Settings Updated: {changes_summary}")
 
     def _on_market_data_update(self, updated_markets: List[str], all_market_data: Dict[str, Any]):
         """Handle real-time market data updates."""
@@ -53,61 +79,62 @@ class Trader:
 
     def _make_trade_decision(self, market_data):
         """
-        Enhanced trade decision making with multiple strategies
+        Enhanced trade decision making with multiple strategies using dynamic settings
         Priority: News Sentiment → Statistical Arbitrage → Volatility Analysis
         """
         trade_decision = None
+        settings = self.settings_manager.settings
 
-        # Strategy 1: News Sentiment Analysis
-        try:
-            sentiment_analysis = self.news_analyzer.get_market_relevant_news()
-            sentiment_decision = self.news_analyzer.should_trade_based_on_sentiment(
-                sentiment_analysis, NEWS_SENTIMENT_THRESHOLD
-            )
+        # Strategy 1: News Sentiment Analysis (if enabled)
+        if settings.news_sentiment_enabled:
+            try:
+                sentiment_analysis = self.news_analyzer.get_market_relevant_news()
+                sentiment_decision = self.news_analyzer.should_trade_based_on_sentiment(
+                    sentiment_analysis, settings.news_sentiment_threshold
+                )
 
-            if sentiment_decision['should_trade']:
-                self.logger.info(f"News sentiment signal: {sentiment_decision['reason']}")
+                if sentiment_decision['should_trade']:
+                    self.logger.info(f"News sentiment signal: {sentiment_decision['reason']}")
 
-                # Find suitable market to trade based on sentiment
-                if market_data and 'markets' in market_data and market_data['markets']:
-                    market = market_data['markets'][0]  # Simple selection - could be enhanced
-                    event_id = market.get('id')
-                    current_price = market.get('current_price')
+                    # Find suitable market to trade based on sentiment
+                    if market_data and 'markets' in market_data and market_data['markets']:
+                        market = market_data['markets'][0]  # Simple selection - could be enhanced
+                        event_id = market.get('id')
+                        current_price = market.get('current_price')
 
-                    if event_id and current_price:
-                        action = 'buy' if sentiment_decision['direction'] == 'long' else 'sell'
-                        quantity = 1  # Base quantity - will be adjusted by risk management
+                        if event_id and current_price:
+                            action = 'buy' if sentiment_decision['direction'] == 'long' else 'sell'
 
-                        trade_decision = {
-                            'event_id': event_id,
-                            'action': action,
-                            'quantity': quantity,
-                            'price': current_price,
-                            'strategy': 'news_sentiment',
-                            'sentiment_score': sentiment_decision['sentiment_score'],
-                            'confidence': sentiment_decision['confidence']
-                        }
+                            # Apply dynamic risk management
+                            position_size_fraction = self.risk_manager.calculate_position_size_kelly(sentiment_decision['confidence'])
+                            position_value = self.risk_manager.current_bankroll * position_size_fraction
+                            quantity = max(1, int(position_value / current_price))
 
-                        # Apply basic risk management to position sizing
-                        position_size_fraction = self.risk_manager.calculate_position_size_kelly(sentiment_decision['confidence'])
-                        position_value = self.risk_manager.current_bankroll * position_size_fraction
-                        trade_decision['quantity'] = max(1, int(position_value / current_price))
+                            trade_decision = {
+                                'event_id': event_id,
+                                'action': action,
+                                'quantity': quantity,
+                                'price': current_price,
+                                'strategy': 'news_sentiment',
+                                'sentiment_score': sentiment_decision['sentiment_score'],
+                                'confidence': sentiment_decision['confidence']
+                            }
 
-                        self.logger.info(f"News sentiment trade decision: {action} {event_id} "
-                                       f"at {current_price} (sentiment: {sentiment_decision['sentiment_score']:.3f})")
+                            self.logger.info(f"News sentiment trade decision: {action} {event_id} "
+                                           f"at {current_price} (sentiment: {sentiment_decision['sentiment_score']:.3f})")
 
-        except Exception as e:
-            self.logger.error(f"Error in news sentiment analysis: {e}")
+            except Exception as e:
+                self.logger.error(f"Error in news sentiment analysis: {e}")
 
-        # Strategy 2: Statistical Arbitrage (if no sentiment signal)
-        if not trade_decision:
+        # Strategy 2: Statistical Arbitrage (if enabled and no sentiment signal)
+        if not trade_decision and settings.statistical_arbitrage_enabled:
             try:
                 arbitrage_opportunities = self._statistical_arbitrage(market_data)
                 if arbitrage_opportunities:
                     # Take the highest confidence opportunity
                     best_opportunity = arbitrage_opportunities[0]
                     execution_decision = self.arbitrage_analyzer.should_execute_arbitrage(
-                        best_opportunity, risk_tolerance=0.7
+                        best_opportunity, risk_tolerance=settings.stat_arbitrage_threshold
                     )
 
                     if execution_decision['should_execute']:
@@ -115,6 +142,7 @@ class Trader:
 
                         # For simplicity, focus on one side of the arbitrage pair
                         market1 = execution_decision['market1']
+                        market2 = execution_decision['market2']
 
                         if best_opportunity['signal'] == 'LONG_SPREAD':
                             event_id = market1['id']
@@ -123,7 +151,7 @@ class Trader:
                             event_id = market1['id']
                             action = 'sell'
 
-                        # Basic risk management
+                        # Apply dynamic risk management
                         position_size_fraction = self.risk_manager.calculate_position_size_kelly(execution_decision['confidence'])
                         position_value = self.risk_manager.current_bankroll * position_size_fraction
                         quantity = max(1, int(position_value / market1['current_price']))
@@ -145,8 +173,8 @@ class Trader:
             except Exception as e:
                 self.logger.error(f"Error in statistical arbitrage: {e}")
 
-        # Strategy 3: Volatility Analysis (if no other signals)
-        if not trade_decision:
+        # Strategy 3: Volatility Analysis (if enabled and no other signals)
+        if not trade_decision and settings.volatility_based_enabled:
             try:
                 volatility_decision = self._volatility_analysis(market_data)
                 if volatility_decision and volatility_decision.get('should_trade'):
@@ -161,7 +189,7 @@ class Trader:
                         if event_id and current_price and volatility_decision.get('direction'):
                             action = 'buy' if volatility_decision['direction'] == 'long' else 'sell'
 
-                            # Basic risk management
+                            # Apply dynamic risk management
                             position_size_fraction = self.risk_manager.calculate_position_size_kelly(volatility_decision['confidence'])
                             position_value = self.risk_manager.current_bankroll * position_size_fraction
                             quantity = max(1, int(position_value / current_price))

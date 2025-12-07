@@ -7,8 +7,17 @@ import json
 import sys
 import time
 from typing import Any, Dict, List
+import logging
 
 from kalshi_api import KalshiAPI
+
+# Add settings manager import
+try:
+    from settings_manager import SettingsManager
+    settings_manager = SettingsManager()
+except ImportError:
+    settings_manager = None
+    logging.warning("SettingsManager not available, settings commands will be limited")
 
 
 def _cents_to_dollars(value: Any) -> float | None:
@@ -114,7 +123,39 @@ def fetch_performance(api: KalshiAPI) -> Dict[str, Any]:
     }
 
 
-def run(command: str) -> Dict[str, Any]:
+def fetch_settings() -> Dict[str, Any]:
+    """Fetch current bot settings."""
+    if settings_manager is None:
+        return {"error": "Settings manager not available"}
+
+    return settings_manager.get_settings()
+
+
+def update_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
+    """Update bot settings."""
+    if settings_manager is None:
+        return {"success": False, "error": "Settings manager not available"}
+
+    return settings_manager.update_settings(updates)
+
+
+def reset_settings() -> Dict[str, Any]:
+    """Reset settings to defaults."""
+    if settings_manager is None:
+        return {"success": False, "error": "Settings manager not available"}
+
+    return settings_manager.reset_to_defaults()
+
+
+def fetch_settings_info() -> Dict[str, Any]:
+    """Get information about available settings."""
+    if settings_manager is None:
+        return {"error": "Settings manager not available"}
+
+    return settings_manager.get_setting_info()
+
+
+def run(command: str, data: Dict[str, Any] = None) -> Dict[str, Any]:
     api = KalshiAPI()
 
     if command == "status":
@@ -126,6 +167,16 @@ def run(command: str) -> Dict[str, Any]:
     if command == "performance":
         return fetch_performance(api)
 
+    # Phase 4: Settings management commands
+    if command == "settings":
+        return fetch_settings()
+    if command == "update_settings":
+        return update_settings(data or {})
+    if command == "reset_settings":
+        return reset_settings()
+    if command == "settings_info":
+        return fetch_settings_info()
+
     raise ValueError(f"Unsupported command: {command}")
 
 
@@ -133,13 +184,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Expose bot state via CLI")
     parser.add_argument(
         "command",
-        choices=["status", "positions", "balance", "performance"],
+        choices=["status", "positions", "balance", "performance", "settings", "update_settings", "reset_settings", "settings_info"],
         help="State command to execute",
+    )
+    parser.add_argument(
+        "--data",
+        type=str,
+        help="JSON data for commands that require input (e.g., update_settings)",
     )
     args = parser.parse_args()
 
+    # Parse data if provided
+    data = None
+    if args.data:
+        try:
+            data = json.loads(args.data)
+        except json.JSONDecodeError as e:
+            print(json.dumps({"error": f"Invalid JSON data: {e}"}))
+            sys.exit(1)
+
     try:
-        payload = run(args.command)
+        payload = run(args.command, data)
         print(json.dumps(payload, default=str))
     except Exception as exc:  # pylint: disable=broad-except
         print(json.dumps({"error": str(exc)}))
