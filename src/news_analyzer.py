@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from textblob import TextBlob
 import re
-from config import NEWS_API_KEY, NEWS_API_BASE_URL
+from src.config import NEWS_API_KEY, NEWS_API_BASE_URL
 
 logger = logging.getLogger(__name__)
 
