@@ -1,6 +1,6 @@
 import time
 import logging
-from config import KALSHI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BANKROLL, TRADE_INTERVAL_SECONDS
+from src.config import KALSHI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BANKROLL, TRADE_INTERVAL_SECONDS
 from kalshi_api import KalshiAPI
 from trader import Trader
 from notifier import Notifier
