@@ -9,7 +9,7 @@ from statsmodels.tsa.stattools import coint, adfuller
 from statsmodels.tsa.vector_ar import vecm
 from scipy import stats
 from sklearn.preprocessing import StandardScaler
-from config import STAT_ARBITRAGE_THRESHOLD
+from src.config import STAT_ARBITRAGE_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
