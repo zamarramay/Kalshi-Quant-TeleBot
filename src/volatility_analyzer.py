@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from arch import arch_model
 from statsmodels.tsa.stattools import adfuller
 from sklearn.preprocessing import StandardScaler
-from config import VOLATILITY_THRESHOLD
+from src.config import VOLATILITY_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
