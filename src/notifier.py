@@ -1,6 +1,6 @@
 import requests
 import logging
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from src.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 class Notifier:
     def __init__(self, bot_token=None, chat_id=None):
