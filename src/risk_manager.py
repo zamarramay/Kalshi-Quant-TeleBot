@@ -4,7 +4,7 @@
 import logging
 import numpy as np
 from typing import Dict, Any
-from config import BANKROLL, MAX_POSITION_SIZE_PERCENTAGE, STOP_LOSS_PERCENTAGE
+from src.config import BANKROLL, MAX_POSITION_SIZE_PERCENTAGE, STOP_LOSS_PERCENTAGE
 
 logger = logging.getLogger(__name__)
 
