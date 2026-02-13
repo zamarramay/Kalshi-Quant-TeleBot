@@ -2,7 +2,7 @@ import logging
 import time
 import requests
 
-from config import (
+from src.config import (
     KALSHI_API_KEY,
     KALSHI_API_BASE_URL,
     MAX_RETRIES,
